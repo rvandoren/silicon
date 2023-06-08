@@ -28,6 +28,7 @@ case class ExtractedModel(entries: Map[String, ExtractedModelEntry]) {
 
 sealed trait ExtractedModelEntry {
   def asValueEntry: ValueEntry
+
   def toString: String
 }
 
@@ -91,10 +92,12 @@ case class SeqEntry(name: String, values: Vector[ExtractedModelEntry]) extends E
   override lazy val toString = s"($name): [${values.map(_.toString).mkString(", ")}]"
   lazy val asValueEntry: ValueEntry = ConstantEntry(name)
 }
+
 case class SetEntry(name: String, values: Set[ExtractedModelEntry]) extends ExtractedModelEntry {
   override lazy val toString = s"($name): {${values.map(_.toString).mkString(", ")}}"
   lazy val asValueEntry: ValueEntry = ConstantEntry(name)
 }
+
 case class MultiSetEntry(name: String, values: Map[ExtractedModelEntry, Int]) extends ExtractedModelEntry {
   override lazy val toString = s"($name): {${values.map(_.toString).mkString(", ")}}"
   lazy val asValueEntry: ValueEntry = ConstantEntry(name)
@@ -161,14 +164,14 @@ object Converter {
     val entry: Option[ModelEntry] = model.entries.get(fname)
     entry match {
       case Some(MapEntry(m, els)) => getConstantEntry(toSort, m.getOrElse(args, els))
-      case Some(m)                => getConstantEntry(toSort, m)
-      case None                   => OtherEntry(fname, "function not found in model")
+      case Some(m) => getConstantEntry(toSort, m)
+      case None => OtherEntry(fname, "function not found in model")
     }
   }
 
   def getConstantEntry(s: Sort, m: ModelEntry): ExtractedModelEntry = {
     //unspecified case if z3 is called with option "model.partial=true"
-    m match { 
+    m match {
       case ConstantEntry("#unspecified") => return OtherEntry("#unspecified", "default case")
       case _ => ()
     }
@@ -176,30 +179,30 @@ object Converter {
       case sorts.Ref => VarEntry(m.toString, sorts.Ref)
       case sorts.Int =>
         m match {
-          case ConstantEntry(x)             => LitIntEntry(BigInt(x))
+          case ConstantEntry(x) => LitIntEntry(BigInt(x))
           case ApplicationEntry(name, args) =>
             // this is needed because negative integers are stored as ApplicationEntries
             val res = getConstantEntry(s, args.head)
             (res, name) match {
               case (LitIntEntry(x), "-") => LitIntEntry(-x)
-              case _                     => OtherEntry(m.toString, "not an integer literal")
+              case _ => OtherEntry(m.toString, "not an integer literal")
             }
           case _ => OtherEntry(m.toString, "not an integer literal")
         }
       case sorts.Bool =>
         m match {
-          case ConstantEntry("true")  => LitBoolEntry(true)
+          case ConstantEntry("true") => LitBoolEntry(true)
           case ConstantEntry("false") => LitBoolEntry(false)
           case ConstantEntry("0") => LitBoolEntry(false) // this is kind of hacky but there is some strangeness happening...
           case ConstantEntry("1") => LitBoolEntry(true)
           case ApplicationEntry(_, arguments) => getConstantEntry(s, arguments.head) // sometimes bools are represented by application("=", application("var",0))
           case _ => OtherEntry(m.toString, "not a boolean literal")
         }
-      case sorts.Seq(_) 
-        | sorts.Set(_)
+      case sorts.Seq(_)
+           | sorts.Set(_)
         // | sorts.Map(_)
         // | sorts.Multiset(_)
-        =>
+      =>
         // entry will be resolved on demand, i.e. when calling `extractVal` in the converter
         // thus, we avoid dealing with recursive Refs and avoid evaluation functions at this stage
         VarEntry(m.toString, s)
@@ -212,26 +215,26 @@ object Converter {
               case x =>
                 val intVal = x.toInt
                 val decimal = x - intVal
-                Rational(intVal, 1) + Rational(1, (1/decimal).toInt)
+                Rational(intVal, 1) + Rational(1, (1 / decimal).toInt)
             }
             LitPermEntry(rational)
           case ApplicationEntry(name, args) =>
             val res = getConstantEntry(s, args.head)
             (res, name) match {
               case (LitPermEntry(x), "-") => LitPermEntry(-x)
-              case (_, "/") =>  (getConstantEntry(s, args.head), getConstantEntry(s, args.drop(1).head)) match {
-                case (LitPermEntry(x), LitPermEntry(y)) => LitPermEntry(x/y)
+              case (_, "/") => (getConstantEntry(s, args.head), getConstantEntry(s, args.drop(1).head)) match {
+                case (LitPermEntry(x), LitPermEntry(y)) => LitPermEntry(x / y)
                 case _ => OtherEntry(m.toString, "not a permission literal div")
               }
               case _ => OtherEntry(m.toString, "not a permission literal")
             }
           case _ => OtherEntry(m.toString, "not a permission literal")
         }
-      case sorts.UserSort(id) => 
+      case sorts.UserSort(id) =>
         m match {
           // TODO: remove this string-based operation
           case ConstantEntry(v) => DomainValueEntry(id.toString, v.split("!").last)
-          case _ => OtherEntry(id.toString,"not a constant entry---")
+          case _ => OtherEntry(id.toString, "not a constant entry---")
         }
       //ISSUE: snap types are translated to domain sorts
       /* case sorts.Snap =>
@@ -251,10 +254,10 @@ object Converter {
 
   def evaluateTerm(term: Term, model: Model): ExtractedModelEntry = {
     term match {
-      case Unit              => UnprocessedModelEntry(ConstantEntry(snapUnitId))
-      case IntLiteral(x)     => LitIntEntry(x)
+      case Unit => UnprocessedModelEntry(ConstantEntry(snapUnitId))
+      case IntLiteral(x) => LitIntEntry(x)
       case t: BooleanLiteral => LitBoolEntry(t.value)
-      case Null              => VarEntry(model.entries(nullRefId).toString, sorts.Ref)
+      case Null => VarEntry(model.entries(nullRefId).toString, sorts.Ref)
       case Var(_, sort) =>
         val key: String = term.toString
         val entry: Option[ModelEntry] = model.entries.get(key)
@@ -279,7 +282,7 @@ object Converter {
 
         val argsFinal = argEntries.map {
           case UnprocessedModelEntry(entry) => entry
-          case e: ExtractedModelEntry       => ConstantEntry(e.toString)
+          case e: ExtractedModelEntry => ConstantEntry(e.toString)
         }
         getFunctionValue(model, fname, argsFinal, toSort)
 
@@ -299,7 +302,7 @@ object Converter {
               OtherEntry(s"First($p)", "unapplicable")
             }
           case OtherEntry(t, _) => OtherEntry(s"First($t)", "unapplicable")
-          case _                => OtherEntry(s"First($sub)", "unapplicable")
+          case _ => OtherEntry(s"First($sub)", "unapplicable")
         }
 
       case Second(p) =>
@@ -312,7 +315,7 @@ object Converter {
               OtherEntry(s"Second($p})", "unapplicable")
             }
           case OtherEntry(t, m) => OtherEntry(s"Second($t)$m", "unapplicable")
-          case _                => OtherEntry(s"Second($sub)", "unapplicable")
+          case _ => OtherEntry(s"Second($sub)", "unapplicable")
         }
 
       case SortWrapper(t, to) =>
@@ -343,19 +346,19 @@ object Converter {
   def extractHeap(h: Iterable[Chunk], model: Model): ExtractedHeap = {
     var entries: Vector[HeapEntry] = Vector()
     h foreach {
-      case c @ BasicChunk(FieldID, _, _, _, _) =>
+      case c@BasicChunk(FieldID, _, _, _, _) =>
         val entry = extractField(c, model)
         entries = entries :+ entry
-      case c @ BasicChunk(PredicateID, _, _, _, _) =>
+      case c@BasicChunk(PredicateID, _, _, _, _) =>
         val entry = extractPredicate(c, model)
         entries = entries :+ entry
       case c: BasicChunk =>
         entries = entries :+ UnresolvedHeapEntry(c, "Magic Wands not supported")
-      case c: st.QuantifiedFieldChunk => 
+      case c: st.QuantifiedFieldChunk =>
         val entry = c.snapshotMap
         val fvf = evaluateTerm(entry, model)
-        val fieldname = c.id.name 
-       
+        val fieldname = c.id.name
+
         try { // many things can go wrong but if they do, we cannot infer anything anyways
           val recvsort = c.singletonRcvr.get.sort
           val receivers = (0 to 10).map(x => VarEntry(s"$$Ref!val!$x", recvsort))
@@ -403,7 +406,7 @@ object Converter {
     // variable is part of a class it should be good enough
     // not really sure if the snap value should be added, seems to be same as one of
     // the args in most cases.
-    
+
     val argsEval = chunk.args.map(x => evaluateTerm(x, model))
     val perm: Option[Rational] = evalPerm(chunk.perm, model)
     PredHeapEntry(chunk.id.toString, argsEval, perm)
@@ -492,13 +495,13 @@ object Converter {
                  elementSort: Sort
                 ): ExtractedModelEntry = {
     val lenTry: Try[Int] = Try(
-        getFunctionValue(
-          model,
-          "Set_card",
-          Seq(ConstantEntry(name)),
-          sorts.Int
-        ).asInstanceOf[LitIntEntry].value.toInt
-      )
+      getFunctionValue(
+        model,
+        "Set_card",
+        Seq(ConstantEntry(name)),
+        sorts.Int
+      ).asInstanceOf[LitIntEntry].value.toInt
+    )
     SetEntry(name, Range.apply(0, lenTry.getOrElse(0)).map(x => getSomeEntry(elementSort, x)).toSet)
   }
 
@@ -506,7 +509,7 @@ object Converter {
     case sorts.Bool => LitBoolEntry(num % 2 == 0)
     case sorts.Int => LitIntEntry(num)
     case UserSort(id) => DomainValueEntry(id.toString, num.toString)
-    case x => VarEntry(s"${x.id.toString.replace("[","<").replace("]",">")}!val!$num" , sort)
+    case x => VarEntry(s"${x.id.toString.replace("[", "<").replace("]", ">")}!val!$num", sort)
   }
 
   def mapLocalVar(sort: Option[Sort],
@@ -531,7 +534,7 @@ object Converter {
           val newEncountered = encountered + name
           for (entry: HeapEntry <- heap.entries) {
             entry match {
-              case FieldHeapEntry(recv, field, perm @ _, sort, value) =>
+              case FieldHeapEntry(recv, field, perm@_, sort, value) =>
                 if (termEval == recv) {
                   val recEntry = mapLocalVar(Some(sort), value, heap, model, newEncountered, nullRefName)
                   map += (field -> (recEntry, perm))
@@ -547,8 +550,8 @@ object Converter {
                 )
                 val perm = perms._1.getOrElse(termEval.asInstanceOf[VarEntry], perms._2)
                 map += (field -> (recEntry, perm))
-                  
-              case _ => 
+
+              case _ =>
             }
           }
           RefEntry(name, map)
@@ -579,7 +582,7 @@ object Converter {
                      model: Model
                     ): ExtractedModel = {
     var map: Map[String, ExtractedModelEntry] = Map()
-    val nullRefName: String = model.entries.getOrElse("$Ref.null","Ref!val!0").toString
+    val nullRefName: String = model.entries.getOrElse("$Ref.null", "Ref!val!0").toString
     for ((variable: ast.AbstractLocalVar, term: Term) <- store.values) {
       var localSort: Option[Sort] = None
       val name = variable match {
@@ -613,9 +616,9 @@ object Converter {
       case d: ast.DomainFuncApp => (d.domainName, d.typVarMap) // sometimes we use a function without having an actual member of this...
 
     }.filterNot(x => containsTypeVar(x._2.values.toSeq)).toSet // make sure we have all possible mappings without duplicates
-    
-    val doms = domains.flatMap(x => if(x.typVars == Nil) Seq((x, Map.empty[ast.TypeVar, ast.Type])) else concreteDoms.filter(_._1 == x.name).map(y =>(x, silicon.toMap(y._2)))) // changing the typevars to the actual ones
-    
+
+    val doms = domains.flatMap(x => if (x.typVars == Nil) Seq((x, Map.empty[ast.TypeVar, ast.Type])) else concreteDoms.filter(_._1 == x.name).map(y => (x, silicon.toMap(y._2)))) // changing the typevars to the actual ones
+
     doms.map(x => {
       val types = try {
         x._1.typVars.map(x._2)
@@ -644,12 +647,13 @@ object Converter {
     * extracts the function instances by searching for the most likely match translating the values in the internal rep
     *
     * @param model
-    * @param func the function to translate
+    * @param func   the function to translate
     * @param genmap map of generic types to concrete types
     * @return
     */
   def translateFunction(model: Model, func: ast.FuncLike, genmap: Map[ast.TypeVar, ast.Type], program: ast.Program): ExtractedFunction = {
     def toSort(typ: ast.Type): Either[Throwable, Sort] = Try(symbolConverter.toSort(typ)).toEither
+
     def toSortWithSubstitutions(typ: ast.Type, typeErrorMsg: String): Either[String, Sort] = {
       toSort(typ)
         .left
@@ -671,7 +675,9 @@ object Converter {
     }
 
     val resSort = toSortWithSubstitutions(resTyp, s"typeError in return type $resTyp")
-      .fold(err => { return errorfunc(s"$fname $err") }, identity)
+      .fold(err => {
+        return errorfunc(s"$fname $err")
+      }, identity)
 
     val smtfunc = func match {
       case t: ast.Function => symbolConverter.toFunction(t).id
@@ -685,15 +691,15 @@ object Converter {
     val entries = model.entries
     val keys = entries.keys
     val modelFuncname = try {
-      (keys.filter(_.contains(fname+"%limited")) ++ keys.filter(_ == fname) ++ keys.filter(_ == kek)).head
+      (keys.filter(_.contains(fname + "%limited")) ++ keys.filter(_ == fname) ++ keys.filter(_ == kek)).head
     } catch {
       case _: Throwable => return errorfunc(s"$fname model function not found")
     }
     entries.get(modelFuncname) match {
       /* A function could be either heap-dependent or heap-independent. If it is the former, each entry's first argument
-        is of type snap. To align this with the function's definition, we add a new parameter to the function of type snap. 
+        is of type snap. To align this with the function's definition, we add a new parameter to the function of type snap.
         We identify a heap-dependent function by checking if it contains the keyword "%limited".
-      */  
+      */
       case Some(MapEntry(m, els)) =>
         if (modelFuncname.contains("%limited")) {
           argSort = Seq(Snap) ++ argSort
@@ -708,7 +714,7 @@ object Converter {
       case Some(ConstantEntry(t)) => ExtractedFunction(fname, argSort, resSort, Map.empty, getConstantEntry(resSort, ConstantEntry(t)))
       case Some(ApplicationEntry(n, args)) => ExtractedFunction(fname, argSort, resSort, Map.empty, getConstantEntry(resSort, ApplicationEntry(n, args)))
       case Some(x) => ExtractedFunction(fname, argSort, resSort, Map.empty, getConstantEntry(resSort, x))
-      case None    => ExtractedFunction(fname, argSort, resSort, Map.empty, OtherEntry(fname, "function not found"))
+      case None => ExtractedFunction(fname, argSort, resSort, Map.empty, OtherEntry(fname, "function not found"))
     }
   }
 }
@@ -732,26 +738,29 @@ case class Converter(model: Model,
   )
   lazy val domains: Seq[DomainEntry] = Converter.getDomains(model, program)
   lazy val nonDomainFunctions: Seq[ExtractedFunction] = Converter.getFunctions(model, program)
+
   def extractVal(x: VarEntry): ExtractedModelEntry =
     Converter.mapLocalVar(
       model = model,
       heap = extractedHeap,
       encountered = Set(),
-      nullRefName = model.entries.getOrElse(Converter.nullRefId,"Ref!val!0").toString,
+      nullRefName = model.entries.getOrElse(Converter.nullRefId, "Ref!val!0").toString,
       termEval = x,
       sort = Some(x.sort)
     )
 }
 
 /**
- * Entry for user defined domains
- * CAREFUL: the types are included in the domain name and do not correspond directly to the name of a DomainEntry
- * rather they correspond to the valueName in the DomainEntry
- */
+  * Entry for user defined domains
+  * CAREFUL: the types are included in the domain name and do not correspond directly to the name of a DomainEntry
+  * rather they correspond to the valueName in the DomainEntry
+  */
 case class DomainValueEntry(domain: String, id: String) extends ExtractedModelEntry {
   def asValueEntry: ValueEntry = ConstantEntry(toString)
+
   override def toString: String = s"${domain}_$id"
-  def getDomainName: String = domain.takeWhile(_!='[')
+
+  def getDomainName: String = domain.takeWhile(_ != '[')
 }
 
 /**
@@ -759,23 +768,24 @@ case class DomainValueEntry(domain: String, id: String) extends ExtractedModelEn
   * result when using original as input for the function
   */
 case class ExtendedDomainValueEntry(original: DomainValueEntry, info: Map[ExtractedFunction, ExtractedModelEntry]) extends ExtractedModelEntry {
-	def asValueEntry: ValueEntry = original.asValueEntry
-	override def toString: String =
-    original.toString ++" where " ++ info.map(infoEntryToString).mkString("{\n\t",";\n\t","\n\t}")
+  def asValueEntry: ValueEntry = original.asValueEntry
+
+  override def toString: String =
+    original.toString ++ " where " ++ info.map(infoEntryToString).mkString("{\n\t", ";\n\t", "\n\t}")
 
   private def infoEntryToString(entry: (ExtractedFunction, ExtractedModelEntry)): String =
     entry._1.fname ++ " = " ++ entry._2.toString.flatMap(y => y match {
       case '\n' => "\n\t"
-      case _ => y+:""
+      case _ => y +: ""
     })
 }
 
 /**
   * Domain entry for specific types, can also be generic
-  *  does not contain axioms 
+  * does not contain axioms
   *
-  * @param name Domain name in viper
-  * @param types type instances or generic types
+  * @param name      Domain name in viper
+  * @param types     type instances or generic types
   * @param functions functions defined within the domain not includeing functions that use this domain
   */
 case class DomainEntry(name: String,
@@ -788,7 +798,7 @@ case class DomainEntry(name: String,
 
   private def printTypes(): String =
     if (types.isEmpty) ""
-    else types.map(printType).mkString("[",", ","]")
+    else types.map(printType).mkString("[", ", ", "]")
 
   private def printType(t: ast.Type): String = t match {
     case ast.TypeVar(x) => x
@@ -797,15 +807,15 @@ case class DomainEntry(name: String,
 }
 
 /**
-  * Function used within or without domains 
+  * Function used within or without domains
   * CAREFUL: it will not evaluate VarEntries this has to be done via the converter or Interpreter
   * it checks the types naïvely, false positives will occur
   *
-  * @param fname function name without Type Parameter since they are concrete functions
-  * @param argtypes types of the arguments
+  * @param fname      function name without Type Parameter since they are concrete functions
+  * @param argtypes   types of the arguments
   * @param returnType return type of function
-  * @param options map from arguments to function value
-  * @param default default value if arguments are not contained in options
+  * @param options    map from arguments to function value
+  * @param default    default value if arguments are not contained in options
   */
 case class ExtractedFunction(fname: String,
                              argtypes: Seq[Sort],
@@ -815,13 +825,13 @@ case class ExtractedFunction(fname: String,
   def apply(args: Seq[ExtractedModelEntry]): Either[ExtractedFunction, ExtractedModelEntry] = {
     val n = args.length
     val arglength = argtypes.length
-    if(n == arglength) { // full application
-      if(typecheck(args, argtypes))
+    if (n == arglength) { // full application
+      if (typecheck(args, argtypes))
         Right(options.getOrElse(args, default))
       else
-        throw new IllegalArgumentException("false types: required "+s"$argtypes"+ " but got: "+ s"$args")
+        throw new IllegalArgumentException("false types: required " + s"$argtypes" + " but got: " + s"$args")
     } else {
-      if(n < arglength) {
+      if (n < arglength) {
         val (subtypes, rest) = argtypes.splitAt(n)
         if (typecheck(args, subtypes)) {
           // return new function with the first n elements applied
@@ -831,22 +841,24 @@ case class ExtractedFunction(fname: String,
         } else {
           throw new IllegalArgumentException(s"false types for partial application: required $subtypes but got: $args")
         }
-      }else
+      } else
         throw new IllegalArgumentException(s"to many arguments for function: $fname")
     }
   }
 
-  def image: Seq[ExtractedModelEntry] = {options.values.toSeq :+ default}
+  def image: Seq[ExtractedModelEntry] = {
+    options.values.toSeq :+ default
+  }
 
   override def toString: String = {
     if (options.nonEmpty)
-      s"$fname${argtypes.mkString("(", ",", ")")}:$returnType{\n" + options.map(o => "    " + o._1.mkString(" ") + " -> " + o._2).mkString("\n") + "\n    else -> " + default +"\n}"
+      s"$fname${argtypes.mkString("(", ",", ")")}:$returnType{\n" + options.map(o => "    " + o._1.mkString(" ") + " -> " + o._2).mkString("\n") + "\n    else -> " + default + "\n}"
     else
-      s"$fname{\n    " + default +"\n}"
+      s"$fname{\n    " + default + "\n}"
   }
 
   def typecheck(is: Seq[ExtractedModelEntry], should: Seq[Sort]): Boolean = {
-      is.zip(should).forall(y => typecheck(y._1, y._2))
+    is.zip(should).forall(y => typecheck(y._1, y._2))
   }
 
   def typecheck(is: ExtractedModelEntry, should: Sort): Boolean = {
@@ -854,9 +866,9 @@ case class ExtractedFunction(fname: String,
       case LitIntEntry(_) => should == sorts.Int
       case LitBoolEntry(_) => should == sorts.Bool
       case LitPermEntry(_) => should == sorts.Perm
-      case RefEntry(_, _) 
-        | NullRefEntry(_)
-        | RecursiveRefEntry(_) => should == sorts.Ref
+      case RefEntry(_, _)
+           | NullRefEntry(_)
+           | RecursiveRefEntry(_) => should == sorts.Ref
       case VarEntry(_, sort) => should == sort
       case OtherEntry(_, _) => false
       case SeqEntry(_, values) => should match {

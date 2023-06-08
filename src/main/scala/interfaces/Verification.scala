@@ -7,8 +7,8 @@
 package viper.silicon.interfaces
 
 import viper.silicon.interfaces.state.Chunk
-import viper.silicon.reporting.{Converter, DomainEntry, ExtractedFunction, ExtractedModel, ExtractedModelEntry, GenericDomainInterpreter, ModelInterpreter, NullRefEntry, RefEntry, UnprocessedModelEntry, VarEntry}
-import viper.silicon.state.{State, Store}
+import viper.silicon.reporting.{Converter, CounterexampleGenerator, DomainEntry, ExtractedFunction, ExtractedModel, ExtractedModelEntry, GenericDomainInterpreter, IntermediateCounterexampleModel, ModelInterpreter, NullRefEntry, RefEntry, UnprocessedModelEntry, VarEntry}
+import viper.silicon.state.{BasicChunk, State, Store}
 import viper.silver.verifier.{ApplicationEntry, ConstantEntry, Counterexample, FailureContext, Model, ValueEntry, VerificationError}
 import viper.silicon.state.terms.Term
 import viper.silver.ast
@@ -165,19 +165,42 @@ case class SiliconMappedCounterexample(internalStore: Store,
                                        program: Program)
     extends SiliconCounterexample {
 
+  println("Currently in SiliconMappedCounterexample Class")
+
   val converter: Converter =
     Converter(nativeModel, internalStore, heap, oldHeaps, program)
-
   val model: Model = nativeModel
   val interpreter: ModelInterpreter[ExtractedModelEntry, Seq[ExtractedModelEntry]] = GenericDomainInterpreter(converter)
   private var heapNames: Map[ValueEntry, String] = Map()
 
   override lazy val toString: String = {
+    println("This is the start of the toString function of the SiliconMappedCounterexample class")
+    println("Model:")
+    println(model.toString)
+    println("InternalStore:")
+    println(internalStore.values)
+    println("Heap names:")
+    println(heapNames.toString())
+    println("Heap (chunks):")
+    println(heap foreach {
+      case c@BasicChunk(id, _, _, _, _) => c.toString
+      case _ => //
+    })
+    val ce = IntermediateCounterexampleModel(nativeModel, internalStore, heap, oldHeaps, program)
+    println("basic Variables of Counterexample:")
+    for (elem <- ce.basicVariables)
+      println(elem.toString)
+    for (elem <- ce.allSequences)
+      println(elem.toString)
+    for (elem <- ce.allSets)
+      println(elem.toString)
+    println(ce.basicHeap.toString)
     val extractedModel = converter.extractedModel
     val bufModels = converter.modelAtLabel
       .map { case (label, model) => s"model at label $label:\n${interpret(model).toString}"}
       .mkString("\n")
     val (bufDomains, bufNonDomainFunctions) = functionsToString()
+    println("This is the end of the toString function of the SiliconMappedCounterexample class")
     s"$bufModels\non return: \n${interpret(extractedModel).toString} $bufDomains $bufNonDomainFunctions"
   }
   private def interpret(t: ExtractedModel): ExtractedModel =
