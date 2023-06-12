@@ -176,7 +176,7 @@ case class SiliconMappedCounterexample(internalStore: Store,
   override lazy val toString: String = {
     println("This is the start of the toString function of the SiliconMappedCounterexample class")
     println("Model:")
-    println(model.toString)
+    //println(model.toString)
     println("InternalStore:")
     println(internalStore.values)
     println("Heap names:")
@@ -188,14 +188,7 @@ case class SiliconMappedCounterexample(internalStore: Store,
     })
     //val ce = IntermediateCounterexampleModel(nativeModel, internalStore, heap, oldHeaps, program)
     val ce = CounterexampleGenerator(nativeModel, internalStore, heap, oldHeaps, program)
-//    println("basic Variables of Counterexample:")
-//    for (elem <- ce.basicVariables)
-//      println(elem.toString)
-//    for (elem <- ce.allSequences)
-//      println(elem.toString)
-//    for (elem <- ce.allSets)
-//      println(elem.toString)
-//    println(ce.basicHeap.toString)
+    println(ce.toString)
     val extractedModel = converter.extractedModel
     val bufModels = converter.modelAtLabel
       .map { case (label, model) => s"model at label $label:\n${interpret(model).toString}"}
