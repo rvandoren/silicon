@@ -18,6 +18,11 @@ import viper.silicon.resources
 import viper.silicon.state.terms.sorts.UserSort
 import viper.silicon.state.terms.sorts.Snap
 
+case class CounterexampleGenerator(model: Model, store: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) {
+  val imCE = IntermediateCounterexampleModel(model, store, heap, oldHeaps, program)
+  //val out = findCorrespondingStoreValue(imCE.basicVariables, imCE.allCollections)
+}
+
 case class IntermediateCounterexampleModel(model: Model, store: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) {
   lazy val basicVariables = IntermediateCounterexampleModel.detBasicVariables(model, store)
   lazy val allSequences = IntermediateCounterexampleModel.detSequences(model)
@@ -72,6 +77,10 @@ case class BasicPredicateCounterexample(name: String, references: Seq[ExtractedM
 
 object IntermediateCounterexampleModel {
 
+  /**
+    * Defines the final value or the indentifier of the final value for every variable in the method containing the
+    * verification error.
+    */
   def detBasicVariables(model: Model, store: Store): Seq[BasicCEVariable] = {
     var res = Seq[BasicCEVariable]()
     for ((k, v) <- store.values) {
@@ -94,7 +103,11 @@ object IntermediateCounterexampleModel {
     res
   }
 
-  // a CE generator for sequences
+  /**
+    * Defines every sequence that can be extracted in the model. The entries of the sequences still consist of identifiers
+    * and are not assigned to their actual value. Additionally, not every sequence in the output set will be mentioned
+    * in the final CE as only sequences that are used in the method containing the verification error will be mentioned there.
+    */
   def detSequences(model: Model): Set[BasicCESequence] = {
     var res = Map[String, Seq[String]]()
     var tempMap = Map[(String, Seq[String]), String]()
@@ -194,6 +207,11 @@ object IntermediateCounterexampleModel {
     ans
   }
 
+  /**
+    * Defines every set that can be extracted in the model. The entries of the sets still consist of identifiers
+    * and are not assigned to their actual value. Additionally, not every set in the output set will be mentioned
+    * in the final CE as only sets that are used in the method containing the verification error will be mentioned there.
+    */
   def detSets(model: Model): Set[BasicCESet] = {
     var res = Map[String, Set[String]]()
     for ((opName, opValues) <- model.entries) {
@@ -271,6 +289,9 @@ object IntermediateCounterexampleModel {
     ans
   }
 
+  /**
+    * Translates a string identifier to an actual AST Viper Type.
+    */
   def detASTTypeFromString(typ: String): Option[Type] = {
     typ match {
       case "Int" => Some(ast.Int)
@@ -281,7 +302,10 @@ object IntermediateCounterexampleModel {
     }
   }
 
-  def detHeap(model: Model, h: Iterable[Chunk]): BasicCounterexampleHeap = {
+  /**
+    * Translates a string identifier to an actual AST Viper Type.
+    */
+  def detHeap(model: Model, h: Iterable[Chunk]): Set[BasicHeapEntry] = {
     var heap = Set[BasicHeapEntry]()
     h foreach {
       case c@BasicChunk(FieldID, _, _, _, _) =>
@@ -289,7 +313,7 @@ object IntermediateCounterexampleModel {
       case c@BasicChunk(PredicateID, _, _, _, _) =>
         heap ++= detPredicate(model, c)
       case c@BasicChunk(id, _, _, _, _) =>
-        println("This Basic Chunk is weird!")
+        println("This Basic Chunk couldn't be matched as a CE heap entry!")
       case c: st.QuantifiedFieldChunk =>
         println("QF Field Chunk:")
         val fieldName = c.id.name
@@ -322,7 +346,7 @@ object IntermediateCounterexampleModel {
         val possiblePerms = detPermWithInv(c.perm, model)
       case _ => println("This case is not supported in detHeap")
     }
-    BasicCounterexampleHeap(heap)
+    heap
   }
 
   def detField(model: Model, chunk: BasicChunk): BasicFieldCounterexample = {
@@ -538,10 +562,6 @@ object IntermediateCounterexampleModel {
 //      case _ => OtherEntry(term.toString, "unhandled")
 //    }
 //  }
-}
-
-case class CounterexampleGenerator(model: Model, store: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) {
-  println("Currently in the CounterexampleGenerator class")
 }
 
 object CounterexampleGenerator {

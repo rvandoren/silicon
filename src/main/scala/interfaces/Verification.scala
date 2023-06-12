@@ -7,7 +7,7 @@
 package viper.silicon.interfaces
 
 import viper.silicon.interfaces.state.Chunk
-import viper.silicon.reporting.{Converter, CounterexampleGenerator, DomainEntry, ExtractedFunction, ExtractedModel, ExtractedModelEntry, GenericDomainInterpreter, IntermediateCounterexampleModel, ModelInterpreter, NullRefEntry, RefEntry, UnprocessedModelEntry, VarEntry}
+import viper.silicon.reporting.{Converter, CounterexampleGenerator, DomainEntry, ExtractedFunction, ExtractedModel, ExtractedModelEntry, GenericDomainInterpreter, ModelInterpreter, NullRefEntry, RefEntry, UnprocessedModelEntry, VarEntry}
 import viper.silicon.state.{BasicChunk, State, Store}
 import viper.silver.verifier.{ApplicationEntry, ConstantEntry, Counterexample, FailureContext, Model, ValueEntry, VerificationError}
 import viper.silicon.state.terms.Term
@@ -186,15 +186,16 @@ case class SiliconMappedCounterexample(internalStore: Store,
       case c@BasicChunk(id, _, _, _, _) => c.toString
       case _ => //
     })
-    val ce = IntermediateCounterexampleModel(nativeModel, internalStore, heap, oldHeaps, program)
-    println("basic Variables of Counterexample:")
-    for (elem <- ce.basicVariables)
-      println(elem.toString)
-    for (elem <- ce.allSequences)
-      println(elem.toString)
-    for (elem <- ce.allSets)
-      println(elem.toString)
-    println(ce.basicHeap.toString)
+    //val ce = IntermediateCounterexampleModel(nativeModel, internalStore, heap, oldHeaps, program)
+    val ce = CounterexampleGenerator(nativeModel, internalStore, heap, oldHeaps, program)
+//    println("basic Variables of Counterexample:")
+//    for (elem <- ce.basicVariables)
+//      println(elem.toString)
+//    for (elem <- ce.allSequences)
+//      println(elem.toString)
+//    for (elem <- ce.allSets)
+//      println(elem.toString)
+//    println(ce.basicHeap.toString)
     val extractedModel = converter.extractedModel
     val bufModels = converter.modelAtLabel
       .map { case (label, model) => s"model at label $label:\n${interpret(model).toString}"}
@@ -210,15 +211,15 @@ case class SiliconMappedCounterexample(internalStore: Store,
   private def functionsToString() : (String, String) = {
     //extractedModel.entries should be a bijection so we can invert the map
     //Since we only care about ref entries we can remove everything else
-    val invEntries = converter.extractedModel.entries.flatMap{ case (name, entry) => 
+    val invEntries = converter.extractedModel.entries.flatMap{ case (name, entry) =>
       entry match {
         case RefEntry(symName, _) => Some(symName -> name)
         case NullRefEntry(symName)=> Some(symName -> name)
         case _ => None
       }}
 
-    val replaceDomainFunction = converter.domains.map{ 
-      case DomainEntry(names, types, functions) => 
+    val replaceDomainFunction = converter.domains.map{
+      case DomainEntry(names, types, functions) =>
       DomainEntry(names, types, renameFunctions(functions, invEntries))
     }
     val bufDomains = replaceDomainFunction.nonEmpty match {
