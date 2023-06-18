@@ -3,7 +3,7 @@ import viper.silicon
 
 import scala.util.{Success, Try}
 import viper.silver.verifier.{ApplicationEntry, ConstantEntry, MapEntry, Model, ModelEntry, ValueEntry}
-import viper.silver.ast.{AbstractLocalVar, AtomicType, CollectionType, IntLit, LocalVar, Type, utility}
+import viper.silver.ast.{AbstractLocalVar, AtomicType, CollectionType, IntLit, LocalVar, Program, Type, utility, Member}
 import viper.silver.ast
 import viper.silicon.{Map, state => st}
 import viper.silicon.interfaces.state.Chunk
@@ -18,26 +18,23 @@ import viper.silicon.resources
 import viper.silicon.state.terms.sorts.UserSort
 import viper.silicon.state.terms.sorts.Snap
 
-import scala.collection.Seq
+
 
 case class CounterexampleGenerator(model: Model, store: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) {
   val imCE = IntermediateCounterexampleModel(model, store, heap, oldHeaps, program)
+  //println(model.entries.toString())
   println(imCE.toString)
 
   val ceStore = CounterexampleGenerator.detStore(store, imCE.basicVariables, imCE.allCollections)
+  var ceHeaps = Seq[(String, HeapCounterexample)]()
+  imCE.allBasicHeaps.reverse.foreach {case (n, h) => ceHeaps +:= ((n, CounterexampleGenerator.detHeap(h, program, imCE.allCollections)))}
 
   override def toString: String = {
-    var finalString = "     Final Counterexampel: \n"
-    finalString ++= "Store: \n"
-    for (in <- ceStore.storeEntries)
-      finalString ++= (in.toString ++ "\n")
-    finalString ++= "Old Heap: \n"
-    //    for (in <- allHeapInstances(0).basicHeapEntries)
-    //      finalString ++= (in.toString ++ "\n")
-    finalString ++= "Return Heap: \n"
-//    for (in <- basicHeap.basicHeapEntries)
-//      finalString ++= (in.toString ++ "\n")
-    finalString ++= "Domains: \n"
+    var finalString = "      Final Counterexample: \n"
+    finalString += "   Store: \n"
+    finalString += ceStore.storeEntries.map(x => x.toString).mkString("", "\n", "\n")
+    finalString += ceHeaps.map(x => "   " + x._1 + " Heap: \n" + x._2.toString).mkString("")
+    finalString += "   Domains: \n"
     finalString
   }
 }
@@ -48,32 +45,55 @@ case class IntermediateCounterexampleModel(model: Model, store: Store, heap: Ite
   val allSets = IntermediateCounterexampleModel.detSets(model)
   val allCollections = allSequences ++ allSets
 
-  val basicHeap = BasicHeap(IntermediateCounterexampleModel.detHeap(model, heap))
+  var allBasicHeaps = Seq(("return", BasicHeap(IntermediateCounterexampleModel.detHeap(model, heap))))
+  oldHeaps.foreach {case (n, h) => allBasicHeaps +:= ((n, BasicHeap(IntermediateCounterexampleModel.detHeap(model, h.values))))}
 
   override def toString: String = {
-    var finalString = "     Intermediate Counterexampel: \n"
-    finalString ++= "Store: \n"
-    for (in <- basicVariables)
-      finalString ++= (in.toString ++ "\n")
-    for (in <- allCollections)
-      finalString ++= (in.toString ++ "\n")
-    finalString ++= "Old Heap: \n"
-//    for (in <- allHeapInstances(0).basicHeapEntries)
-//      finalString ++= (in.toString ++ "\n")
-    finalString ++= "Return Heap: \n"
-    for (in <- basicHeap.basicHeapEntries)
-      finalString ++= (in.toString ++ "\n")
-    finalString ++= "Domains: \n"
+    var finalString = "      Intermediate Counterexample: \n"
+    finalString ++= "   Local Information: \n"
+    if (!basicVariables.isEmpty) finalString += basicVariables.map(x => x.toString).mkString("", "\n", "\n")
+    if (!allCollections.isEmpty) finalString += allCollections.map(x => x.toString).mkString("", "\n", "\n")
+    finalString += allBasicHeaps.map(x => "   " + x._1 + " Heap: \n" + x._2.toString).mkString("", "\n", "\n")
+    finalString ++= "   Domains: \n"
     finalString
   }
 }
 
 case class StoreCounterexample(storeEntries: Seq[StoreEntry]) {
+  var finalString = ""
+  storeEntries.foreach { se => finalString ++= se.toString + "\n"}
+  override lazy val toString = finalString
+}
 
-}
 case class StoreEntry(id: AbstractLocalVar, entry: CEValue) {
-  override lazy val toString = s"Variable Name: ${id.name}, Value: ${entry.value.toString}, Type: ${id.typ.toString}"
+  override lazy val toString = {
+    entry match {
+      case CEVariable(_, _, _) => s"Variable Name: ${id.name}, Value: ${entry.value.toString}, Type: ${id.typ.toString}"
+      case _ => s"  Collection variable ${id.name} of type ${id.typ.toString}: \n ${entry.toString}"
+    }
+  }
 }
+
+case class HeapCounterexample(heapEntries: Seq[(Member, FinalHeapEntry)]) {
+  var finalString = ""
+  heapEntries.foreach { se => finalString ++= se._2.toString ++ "\n" }
+  override lazy val toString = finalString
+}
+
+sealed trait FinalHeapEntry
+
+case class FieldFinalEntry(ref: String, field: String, entry: CEValue, perm: Option[Rational], typ: Type) extends FinalHeapEntry {
+  override lazy val toString = s"Field Entry: $ref.$field --> (Value: ${entry.value.toString}, Type: ${typ}, Perm: ${perm.getOrElse("#undefined").toString})"
+}
+
+case class PredFinalEntry(name: String, args: Seq[String], perm: Option[Rational]) extends FinalHeapEntry {
+  override lazy val toString = s"Predicate Entry: $name(${args.mkString("(", ", ", ")")} --> (Perm: ${perm.getOrElse("#undefined").toString})"
+}
+
+case class WandFinalEntry(firstPart: String, secondPart: String, args: Seq[String], perm: Option[Rational]) extends FinalHeapEntry {
+  override lazy val toString = "to do"
+}
+
 sealed trait CEValue {
   val id : String
   val value : Any
@@ -87,21 +107,40 @@ case class CEVariable(name: String, entryValue: ModelEntry, typ: Option[Type]) e
   override lazy val toString = s"Variable Name: ${name}, Value: ${value.toString}, Type: ${typ.getOrElse("None").toString}"
 }
 
-case class CESequence(name: String, sequence: Seq[String], memberTypes: Option[Type]) extends CEValue {
+case class CESequence(name: String, length: BigInt, entries: Map[BigInt, String], sequence: Seq[String], memberTypes: Option[Type]) extends CEValue {
   val id = name
   val value = sequence
   val valueType = memberTypes
-  override lazy val toString = s"Sequence: $name --> $sequence, Type: Seq($memberTypes)"
+  val size = length
+  val inside = entries
+  override lazy val toString = {
+    var finalString = s"Set $name of size ${size.toString()} with entries:"
+    for ((k,v) <- inside)
+      finalString ++= s"\n $v at index ${k.toString()}"
+    finalString
+  }
+
 }
 
-case class CESet(name: String, set: Set[String], memberTypes: Option[Type]) extends CEValue {
+case class CESet(name: String, cardinality: BigInt, containment: Map[String, Boolean], set: Set[String], memberTypes: Option[Type]) extends CEValue {
   val id = name
   val value = set
   val valueType = memberTypes
-  override lazy val toString = s"Set: $name --> $set, Type: Set($memberTypes)"
+  val size = cardinality
+  val inside = containment
+  override lazy val toString = {
+    var finalString = s"Set $name of size ${size.toString()} with entries: {"
+    for ((k, v) <- inside) {
+      if (v) {
+        finalString ++= s" $k,"
+      }
+    }
+    finalString ++ "}"
+  }
 }
 
 case class CEMultiset(name: String, multiset: Set[String], memberTypes: Option[Type]) extends CEValue {
+  // TODO: Multisets are not evaluated yet
   val id = name
   val value = multiset
   val valueType = memberTypes
@@ -109,24 +148,12 @@ case class CEMultiset(name: String, multiset: Set[String], memberTypes: Option[T
 }
 
 case class BasicHeap(basicHeapEntries: Set[BasicHeapEntry]) {
-  var finalString = ""
-  basicHeapEntries.foreach{case x => finalString ++= (x.toString ++ "\n")}
-  override lazy val toString = finalString
+  override lazy val toString = basicHeapEntries.map(x => x.toString).mkString("", "\n", "")
 }
 
-case class BasicHeapEntry(reference: String, field: String, valueID: String, perm: Option[Rational], typ: String) {
-  override lazy val toString = s"Basic heap entry: $reference + $field --> (Value: $valueID, Permission: ${perm.getOrElse("None")})"
+case class BasicHeapEntry(reference: Seq[String], field: Seq[String], valueID: String, perm: Option[Rational], het: HeapEntryType) {
+  override lazy val toString = s"Basic heap entry: ${reference.mkString("(", ", ", ")")} + ${field.mkString("(", ", ", ")")} --> (Value: $valueID, Permission: ${perm.getOrElse("None")})"
 }
-
-//sealed trait BasicHeapEntry
-//
-//case class BasicFieldCounterexample(reference: String, field: String, value: String, permission: Option[Rational], valueType: String) extends BasicHeapEntry {
-//  override lazy val toString = s"Ref: $reference, Field: $field, Value: $value, perm: $permission, Type: $valueType"
-//}
-//
-//case class BasicPredicateCounterexample(name: String, references: Seq[ExtractedModelEntry], values: Seq[String], permission: Option[Rational], valueType: String) extends BasicHeapEntry {
-//  override lazy val toString = s"Name: $name, References: ${references.map(x => x.toString)}, Values: $values, Perm: $permission, Type: $valueType"
-//}
 
 object IntermediateCounterexampleModel {
 
@@ -151,6 +178,12 @@ object IntermediateCounterexampleModel {
             println(s"Couldn't find a ConstantEntry or ApplicationEntry for the Variable: ${k.name}")
           }
         case None => //println(s"Couldn't find an entry for the Variable: ${k.name}")
+      }
+    }
+    if (model.entries.contains("$Ref.null")) {
+      val nullRef = model.entries.get("$Ref.null").get
+      if (nullRef.isInstanceOf[ConstantEntry]) {
+        res +:= CEVariable("null", nullRef, Some(ast.Ref))
       }
     }
     res
@@ -208,9 +241,11 @@ object IntermediateCounterexampleModel {
         if (opName == "Seq_append") {
           (res.get(k(0)), res.get(k(1))) match {
             case (Some(x), Some(y)) =>
-              res += (v -> (x ++ y))
-              tempMap -= ((opName, k))
-              found = true
+              if (!res.contains(v)) {
+                res += (v -> (x ++ y))
+                tempMap -= ((opName, k))
+                found = true
+              }
             case (_, _) => //
           }
         } else if (opName == "Seq_take") {
@@ -237,7 +272,7 @@ object IntermediateCounterexampleModel {
               found = true
             case _ => //
           }
-        } else if (opName == "Seq_upadte") {
+        } else if (opName == "Seq_update") {
           res.get(k(0)) match {
             case Some(x) =>
               res += (k(0) -> x.updated(k(1).toInt, v))
@@ -255,7 +290,15 @@ object IntermediateCounterexampleModel {
           case Some(x) => Some(ast.SeqType(x))
           case None => None
         }
-        ans += CESequence(n, s, typ)
+        var entries = Map[BigInt, String]()
+        var counter = 0
+        for (e <- s) {
+          if (e != "#undefined") {
+            entries += ((BigInt(counter), e))
+          }
+          counter += 1
+        }
+        ans += CESequence(n, BigInt(s.length), entries, s, typ)
     }
     ans
   }
@@ -337,7 +380,13 @@ object IntermediateCounterexampleModel {
           case Some(x) => Some(ast.SetType(x))
           case None => None
         }
-        ans += CESet(n, s, typ)
+        var containment = Map[String, Boolean]()
+        for (e <- s) {
+          if (e != "#undefined") {
+            containment += ((e, true))
+          }
+        }
+        ans += CESet(n, BigInt(s.size), containment, s, typ)
     }
     ans
   }
@@ -356,7 +405,7 @@ object IntermediateCounterexampleModel {
   }
 
   /**
-    * Translates a string identifier to an actual AST Viper Type.
+    * Transforms the Heap Chunks to their Viper heap types.
     */
   def detHeap(model: Model, h: Iterable[Chunk]): Set[BasicHeapEntry] = {
     var heap = Set[BasicHeapEntry]()
@@ -374,6 +423,7 @@ object IntermediateCounterexampleModel {
         val possiblePerms = detPermWithInv(c.perm, model)
         model.entries.get(s"$$FVF.lookup_$fieldName") match {
           case Some(x) =>
+            //TODO: determine the permission
             for ((k, v) <- x.asInstanceOf[MapEntry].options) {
               if (k(0).toString == fvf.toString) {
                 val reference = k(1)
@@ -384,7 +434,7 @@ object IntermediateCounterexampleModel {
                 println(s"Value: $value")
                 println(s"Perm: ${c.perm}")
                 println(s"New Perm: $tempPerm")
-                heap += BasicHeapEntry(reference.toString, fieldName, value, None, "not defined")
+                heap += BasicHeapEntry(Seq(reference.toString), Seq(fieldName), value, None, QPPredicateType)
               }
             }
           case None => println(s"There is not QF with the snapshot: ${c.snapshotMap}")
@@ -403,15 +453,11 @@ object IntermediateCounterexampleModel {
   }
 
   def detField(model: Model, chunk: BasicChunk): BasicHeapEntry = {
-    println("Field Chunk:")
-    println(chunk.toString)
-    println(chunk.args.toString())
-    val recvVar = evaluateTerm(chunk.args(0), model)
+    val recvVar = evaluateTerm(chunk.args(0), model).toString
     val fieldName = chunk.id.name
     val value = evaluateTerm(chunk.snap, model).toString
     val perm = evalPerm(chunk.perm, model)
-    val typ = chunk.snap.sort
-    BasicHeapEntry(recvVar.toString, fieldName, value, perm, typ.toString)
+    BasicHeapEntry(Seq(recvVar), Seq(fieldName), value, perm, FieldType)
   }
 
   def detPredicate(model: Model, chunk: BasicChunk): Set[BasicHeapEntry] = {
@@ -429,10 +475,12 @@ object IntermediateCounterexampleModel {
     }
     val perm = evalPerm(chunk.perm, model)
     val sort = chunk.snap.sort
-    retMap += BasicHeapEntry(predName, references.toString(), insidePredicate.toString(), perm, sort.toString)
+    retMap += BasicHeapEntry(Seq(predName), references.map(x => x.toString), insidePredicate.toString(), perm, PredicateType)
     retMap
   }
 
+
+  // TODO: when the same combination is not evaluate till the end it is false
   def detPermWithInv(perm: Term, model: Model): Map[Seq[Seq[ValueEntry]], Option[Rational]] = {
     val check = "^inv@[0-9]+@[0-9]+\\([^)]*\\)$"
     val (originals, replacements) = detTermReplacement(perm, check).toSeq.unzip
@@ -487,7 +535,8 @@ object IntermediateCounterexampleModel {
 
 
   def detMagicWand(model: Model, chunk: BasicChunk): BasicHeapEntry = {
-    BasicHeapEntry("recvVar.toString", "fieldName", "value", None, "typ.toString")
+    //TODO
+    BasicHeapEntry(Seq("recvVar.toString"), Seq("fieldName"), "value", None, MagicWandType)
   }
 
   def evalPerm(value: Term, model: Model): Option[Rational] = {
@@ -496,13 +545,80 @@ object IntermediateCounterexampleModel {
         case LitPermEntry(value) => Some(value)
         case _ => None
       }
-      case App(_, _) => None
+      case App(applicable, argsSeq) => None
+      // case PermLiteral(x) => Some(x)
+      case IntLiteral(n) => Some(Rational.apply(n, 1))
       case NoPerm => Some(Rational.zero)
       case FullPerm => Some(Rational.one)
+      case Null => None
+      case a:BooleanLiteral => if (a.value) Some(Rational.apply(1, 1)) else Some(Rational.apply(0, 1))
+      case _: Quantification => None //TODO
+      case Plus(v1, v2) =>
+        val pr1 = evalPerm(v1, model)
+        val pr2 = evalPerm(v2, model)
+        if (pr1 != None && pr2 != None) {
+          val num = pr1.get.numerator*pr2.get.denominator + pr2.get.numerator*pr1.get.denominator
+          val den = pr1.get.denominator*pr2.get.denominator
+          Some(Rational.apply(num, den))
+        } else {
+          None
+        }
+      case Minus(v1, v2) =>
+        val pr1 = evalPerm(v1, model)
+        val pr2 = evalPerm(v2, model)
+        if (pr1 != None && pr2 != None) {
+          val num = pr1.get.numerator * pr2.get.denominator - pr2.get.numerator * pr1.get.denominator
+          val den = pr1.get.denominator * pr2.get.denominator
+          Some(Rational.apply(num, den))
+        } else {
+          None
+        }
+      case Times(v1, v2) =>
+        val pr1 = evalPerm(v1, model)
+        val pr2 = evalPerm(v2, model)
+        if (pr1 != None && pr2 != None) {
+          val num = pr1.get.numerator * pr2.get.numerator
+          val den = pr1.get.denominator * pr2.get.denominator
+          Some(Rational.apply(num, den))
+        } else {
+          None
+        }
+      case Div(v1, v2) =>
+        val pr1 = evalPerm(v1, model)
+        val pr2 = evalPerm(v2, model)
+        if (pr1 != None && pr2 != None) {
+          val num = pr1.get.numerator * pr2.get.denominator
+          val den = pr1.get.denominator * pr2.get.numerator
+          Some(Rational.apply(num, den))
+        } else {
+          None
+        }
+      case Mod(v1, v2) => None //TODO
+      case Not(v) =>
+        val pr = evalPerm(v, model)
+        if (pr != None) {
+          Some(Rational.apply(1-pr.get.numerator, pr.get.denominator)
+        } else {
+          None
+        }
+      case Or(valueSeq) => //TODO: doesn't work yet
+        def detPermGreaterZero(perm: Option[Rational]): Option[Rational] = {
+          if (perm != None) {
+            if (perm.get.numerator > 0) {
+              Some(Rational.one)
+            } else {
+              Some(Rational.zero)
+            }
+          } else {
+            None
+          }
+        }
+        valueSeq.foldLeft[](detPermGreaterZero(evalPerm(valueSeq.head, model)), valueSeq.tail.map(x => detPermGreaterZero(evalPerm(x, model))))
       case FractionPermLiteral(r) => Some(r)
-      case _: FractionPerm => None
-      case IsValidPermVar(_) => None
-      case IsReadPermVar(_) => None
+      case FractionPerm(v1, v2) => if (v1.isInstanceOf[IntLiteral] && v2.isInstanceOf[IntLiteral]) Some(Rational(v1.asInstanceOf[IntLiteral].n, v2.asInstanceOf[IntLiteral].n)) else None
+      case IsValidPermVar(v) => evalPerm(v, model)
+      case IsReadPermVar(v) => evalPerm(v, model)
+      case Let(_) => None
       case PermTimes(v1, v2) =>
         evalPerm(v1, model).flatMap(x => evalPerm(v2, model).map(y => x * y))
       case IntPermTimes(v1, v2) =>
@@ -516,6 +632,15 @@ object IntermediateCounterexampleModel {
       case PermLess(_, _) => None
       case PermAtMost(_, _) => None
       case PermMin(_, _) => None
+      case SortWrapper(t, _) => evalPerm(t, model)
+      case Distinct(domainFunSet) => None
+      case Let(bindings, body) => None
+      // Term cases that are not handled: MagicWandChunkTerm, MagicWandSnapshot,
+      // PredicateTrigger, PredicateDomain, PredicatePermLookup, PredicateLookup,
+      // FieldTrigger, Domain, PermLookup, Lookup,
+      // trait Decl, Applicable, Function
+      // trait SnapshotTerm
+      // trait SetTerm, MapTerm, MultisetTerm
       case _ => None
     }
   }
@@ -639,7 +764,41 @@ object CounterexampleGenerator {
     StoreCounterexample(ans)
   }
 
-  def detHeap(): Any = {
-
+  def detHeap(basicHeap: BasicHeap, program: Program, collections: Set[CEValue]): HeapCounterexample = {
+    var ans = Seq[(Member, FinalHeapEntry)]()
+    for (bhe <- basicHeap.basicHeapEntries) {
+      bhe.het match {
+        case FieldType | QPPredicateType =>
+          for ((fn, fv) <- program.fieldsByName) {
+            if (fn == bhe.field(0)) {
+              var found = false
+              for (coll <- collections) {
+                if (bhe.valueID == coll.id) {
+                  ans +:= (fv, FieldFinalEntry(bhe.reference(0), bhe.field(0), coll, bhe.perm, fv.typ))
+                  found = true
+                }
+              }
+              if (!found) {
+                ans +:= (fv, FieldFinalEntry(bhe.reference(0), bhe.field(0), CEVariable("#undefined", ConstantEntry(bhe.valueID), Some(fv.typ)), bhe.perm, fv.typ))
+              }
+            }
+          }
+        case PredicateType | QPPredicateType =>
+          for ((pn, pv) <- program.predicatesByName) {
+            if (pn == bhe.reference(0)) {
+              ans +:= (pv, PredFinalEntry(bhe.reference(0), bhe.field, bhe.perm))
+            }
+          }
+      }
+    }
+    HeapCounterexample(ans)
   }
 }
+
+sealed trait HeapEntryType
+case object FieldType extends HeapEntryType
+case object PredicateType extends HeapEntryType
+case object QPFieldType extends HeapEntryType
+case object QPPredicateType extends HeapEntryType
+case object MagicWandType extends HeapEntryType
+case object QPMagicWandType extends HeapEntryType

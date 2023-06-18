@@ -186,7 +186,6 @@ case class SiliconMappedCounterexample(internalStore: Store,
       case c@BasicChunk(id, _, _, _, _) => c.toString
       case _ => //
     })
-    //val ce = IntermediateCounterexampleModel(nativeModel, internalStore, heap, oldHeaps, program)
     val ce = CounterexampleGenerator(nativeModel, internalStore, heap, oldHeaps, program)
     println(ce.toString)
     val extractedModel = converter.extractedModel
