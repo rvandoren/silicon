@@ -188,6 +188,7 @@ case class SiliconMappedCounterexample(internalStore: Store,
     })
     val ce = CounterexampleGenerator(nativeModel, internalStore, heap, oldHeaps, program)
     println(ce.toString)
+    println("in converter")
     val extractedModel = converter.extractedModel
     val bufModels = converter.modelAtLabel
       .map { case (label, model) => s"model at label $label:\n${interpret(model).toString}"}
