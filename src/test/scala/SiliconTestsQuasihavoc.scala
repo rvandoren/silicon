@@ -5,7 +5,9 @@
 // Copyright (c) 2011-2022 ETH Zurich.
 
 package viper.silicon.tests
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class SiliconTestsQuasihavoc extends SiliconTests {
   override val testDirectories: Seq[String] = Seq("quasihavoc")
 

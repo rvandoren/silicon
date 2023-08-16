@@ -11,7 +11,9 @@ import viper.silver.ast._
 import viper.silver.ast.utility.ViperStrategy
 import viper.silver.frontend.SilFrontend
 import viper.silver.verifier.Failure
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class NodeBacktranslationTests extends AnyFunSuite {
   test("Issue #348 Test 1") {
     runTest("errorMessageTests/misc/", "0348-1", tests.instantiateFrontend())

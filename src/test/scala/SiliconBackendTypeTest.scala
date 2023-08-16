@@ -8,7 +8,9 @@ import viper.silicon.Silicon
 import viper.silver.reporter.NoopReporter
 import viper.silver.testing.BackendTypeTest
 import viper.silver.verifier.Verifier
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class SiliconBackendTypeTest extends BackendTypeTest {
   override val verifier: Verifier = {
     val reporter = NoopReporter

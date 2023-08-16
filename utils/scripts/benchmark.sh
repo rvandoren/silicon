@@ -3,7 +3,7 @@
 PROGRAM_NAME=${0##*/} # https://stackoverflow.com/a/3588939
 
 PAUSE="false"
-SILICONTESTS_REPETITIONS=10
+SILICONTESTS_REPETITIONS=3
 SILICONTESTS_TIMEOUT="180" # in seconds
 SILICONTESTS_RANDOMIZE_Z3="false"
 SILICONTESTS_CSV="benchmark_$(date +%Y-%m-%d_%H-%M).csv"

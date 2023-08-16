@@ -1,8 +1,10 @@
 package viper.silicon.reporting
 
 import viper.silver.verifier.{ApplicationEntry, ConstantEntry, MapEntry, Model, ValueEntry}
-import viper.silver.ast.{LocalVar, Member, Program, Type, Resource}
+import viper.silver.ast.{CondExp, Exp, FieldAccessPredicate, LocalVar, Member, NeCmp, Predicate, Program, Resource, Type}
 import viper.silver.ast
+
+import scala.util.Try
 import viper.silicon.{Map, state => st}
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.resources.{FieldID, PredicateID}
@@ -11,41 +13,54 @@ import viper.silicon.state.terms._
 import viper.silicon.state._
 import viper.silicon.decider.TermToSMTLib2Converter
 import viper.silicon.interfaces.decider.TermConverter
+import viper.silicon.interfaces.SiliconCounterexample
 import viper.silicon.reporting.Converter.evaluateTerm
 import viper.silver.verifier._
 import viper.silver.verifier.Rational
 
 
 
-case class CounterexampleGenerator(model: Model, store: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) {
-  println(model.entries.toString())
-  val imCE = IntermediateCounterexampleModel(model, store, heap, oldHeaps, program)
-  println(imCE.toString)
+case class CounterexampleGenerator(model: Model, internalStore: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) extends  SiliconCounterexample {
+  val imCE = IntermediateCounterexampleModel(model, internalStore, heap, oldHeaps, program)
 
-  val (ceStore, refOcc) = CounterexampleGenerator.detStore(store, imCE.basicVariables, imCE.allCollections)
+  val (ceStore, refOcc) = CounterexampleGenerator.detStore(internalStore, imCE.basicVariables, imCE.allCollections)
+  val nameTranslationMap = CounterexampleGenerator.detTranslationMap(ceStore, refOcc)
   var ceHeaps = Seq[(String, HeapCounterexample)]()
-  imCE.allBasicHeaps.reverse.foreach {case (n, h) => ceHeaps +:= ((n, CounterexampleGenerator.detHeap(h, program, imCE.allCollections, refOcc, model)))}
+  imCE.allBasicHeaps.reverse.foreach {case (n, h) =>
+    if (n == "return") {
+      ceHeaps +:= (("current", CounterexampleGenerator.detHeap(h, program, imCE.allCollections, nameTranslationMap, model)))
+    } else {
+      ceHeaps +:= ((n, CounterexampleGenerator.detHeap(h, program, imCE.allCollections, nameTranslationMap, model)))
+    }}
 
-  lazy val DomainsAndFunctions = imCE.DomainEntries ++ imCE.nonDomainFunctions
+  val domainsAndFunctions = CounterexampleGenerator.detTranslatedDomains(imCE.DomainEntries, nameTranslationMap) ++ CounterexampleGenerator.detTranslatedFunctions(imCE.nonDomainFunctions, nameTranslationMap)
   override def toString: String = {
     var finalString = "      Final Counterexample: \n"
     finalString += "   Store: \n"
-    finalString += ceStore.storeEntries.map(x => x.toString).mkString("", "\n", "\n")
-    finalString += ceHeaps.map(x => "   " + x._1 + " Heap: \n" + x._2.toString).mkString("")
-    finalString += "   Domains: \n"
-    finalString += DomainsAndFunctions.map(x => x.toString).mkString("", "\n", "\n")
+    if (!ceStore.storeEntries.isEmpty)
+      finalString += ceStore.storeEntries.map(x => x.toString).mkString("", "\n", "\n")
+    if (!ceHeaps.filter(y => !y._2.heapEntries.isEmpty).isEmpty)
+    finalString += ceHeaps.filter(y => !y._2.heapEntries.isEmpty).map(x => "   " + x._1 + " Heap: \n" + x._2.toString).mkString("")
+    if (domainsAndFunctions.nonEmpty) {
+      finalString += "   Domains: \n"
+      finalString += domainsAndFunctions.map(x => x.toString).mkString("", "\n", "\n")
+    }
     finalString
+  }
+
+  override def withStore(s: Store): SiliconCounterexample = {
+    CounterexampleGenerator(model, s, heap, oldHeaps, program)
   }
 }
 
-case class IntermediateCounterexampleModel(model: Model, store: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) {
-  val basicVariables = IntermediateCounterexampleModel.detBasicVariables(model, store)
+case class IntermediateCounterexampleModel(model: Model, internalStore: Store, heap: Iterable[Chunk], oldHeaps: State.OldHeaps, program: ast.Program) extends SiliconCounterexample {
+  val basicVariables = IntermediateCounterexampleModel.detBasicVariables(model, internalStore)
   val allSequences = IntermediateCounterexampleModel.detSequences(model)
   val allSets = IntermediateCounterexampleModel.detSets(model)
   val allMultisets = IntermediateCounterexampleModel.detMultisets(model)
   val allCollections = allSequences ++ allSets ++ allMultisets
-  var allBasicHeaps = Seq(("return", BasicHeap(IntermediateCounterexampleModel.detHeap(model, heap))))
-  oldHeaps.foreach {case (n, h) => allBasicHeaps +:= ((n, BasicHeap(IntermediateCounterexampleModel.detHeap(model, h.values))))}
+  var allBasicHeaps = Seq(("return", BasicHeap(IntermediateCounterexampleModel.detHeap(model, heap, program.predicatesByName))))
+  oldHeaps.foreach {case (n, h) => allBasicHeaps +:= ((n, BasicHeap(IntermediateCounterexampleModel.detHeap(model, h.values, program.predicatesByName))))}
 
   val DomainEntries = IntermediateCounterexampleModel.getAllDomains(model, program)
   val nonDomainFunctions = IntermediateCounterexampleModel.getAllFunctions(model, program)
@@ -66,6 +81,10 @@ case class IntermediateCounterexampleModel(model: Model, store: Store, heap: Ite
     if (!nonDomainFunctions.isEmpty)
       finalString += nonDomainFunctions.map(x => x.toString).mkString("", "\n", "\n")
     finalString
+  }
+
+  override def withStore(s: Store): SiliconCounterexample = {
+    CounterexampleGenerator(model, s, heap, oldHeaps, program).imCE
   }
 }
 
@@ -92,7 +111,7 @@ object IntermediateCounterexampleModel {
             } else {
               println(s"Couldn't find a ConstantEntry or ApplicationEntry for the Variable: ${k.name}")
             }
-          case None => //println(s"Couldn't find an entry for the Variable: ${k.name}")
+          case None => //
         }
       } else {
         var varTyp: Option[Type] = None
@@ -151,7 +170,9 @@ object IntermediateCounterexampleModel {
       if (opName == "Seq_range") {
         if (opValues.isInstanceOf[MapEntry]) {
           for ((k, v) <- opValues.asInstanceOf[MapEntry].options) {
-            res += (v.toString -> Seq.range(k(0).toString.toInt, k(1).toString.toInt).map(x => x.toString))
+            if (k(0).isInstanceOf[ConstantEntry] && k(1).isInstanceOf[ConstantEntry]) {
+              res += (v.toString -> Seq.range(k(0).toString.toInt, k(1).toString.toInt).map(x => x.toString))
+            }
           }
         }
       }
@@ -197,7 +218,7 @@ object IntermediateCounterexampleModel {
         } else if (opName == "Seq_update") {
           res.get(k(0)) match {
             case Some(x) =>
-              res += (k(0) -> x.updated(k(1).toInt, v))
+              res += (v -> x.updated(k(1).toInt, k(2)))
               tempMap -= ((opName, k))
               found = true
             case _ => //
@@ -461,47 +482,43 @@ object IntermediateCounterexampleModel {
   /**
     * Transforms the Heap Chunks to their Viper heap types.
     */
-  def detHeap(model: Model, h: Iterable[Chunk]): Set[BasicHeapEntry] = {
+  def detHeap(model: Model, h: Iterable[Chunk], predByName: scala.collection.immutable.Map[String, Predicate]): Set[BasicHeapEntry] = {
     var heap = Set[BasicHeapEntry]()
     h foreach {
       case c@BasicChunk(FieldID, _, _, _, _) =>
         heap += detField(model, c)
       case c@BasicChunk(PredicateID, _, _, _, _) =>
-        heap += detPredicate(model, c)
+        heap += detPredicate(model, c, predByName)
       case c@BasicChunk(id, _, _, _, _) =>
         println("This Basic Chunk couldn't be matched as a CE heap entry!")
       case c: st.QuantifiedFieldChunk =>
         val fieldName = c.id.name
         val fvf = evaluateTerm(c.snapshotMap, model)
-        val possiblePerms = detPermWithInv(c.perm, model)
+        val possiblePerm = detPermWithInv(c.perm, model)
         model.entries.get(s"$$FVF.lookup_$fieldName") match {
           case Some(x) =>
             for ((k, v) <- x.asInstanceOf[MapEntry].options) {
               if (k(0).toString == fvf.toString) {
                 val reference = k(1)
                 val value = v.toString
-                val tempPerm = possiblePerms.getOrElse(Seq(Seq(reference)), None)
-                heap += BasicHeapEntry(Seq(reference.toString), Seq(fieldName), value, tempPerm, QPFieldType)
+                val tempPerm = possiblePerm._2
+                heap += BasicHeapEntry(Seq(reference.toString), Seq(fieldName), value, tempPerm, QPFieldType, None)
               }
             }
-          case None => println(s"There is not QF with the snapshot: ${c.snapshotMap}")
+          case None => //println(s"There is no QF with the snapshot: ${c.snapshotMap}")
         }
       case c: st.QuantifiedPredicateChunk =>
         val predName = c.id.name
         val fvf = evaluateTerm(c.snapshotMap, model)
-        val possiblePerms = detPermWithInv(c.perm, model)
-        for (pp <- possiblePerms) {
-          val validBool = pp._1 match {
-            case head +: tail => tail.forall(_ == head)
-            case _ => true
-          }
-          if (validBool) {
-            heap += BasicHeapEntry(Seq(predName), pp._1.head.map(x => x.toString), "#undefined", pp._2, QPPredicateType)
-          }
+        val possiblePerm = detPermWithInv(c.perm, model)
+        var fSeq: Seq[String] = Seq()
+        if (!possiblePerm._1.isEmpty) {
+          fSeq = possiblePerm._1.head.map(x => x.toString)
         }
+        heap += BasicHeapEntry(Seq(predName), fSeq, "#undefined", possiblePerm._2, QPPredicateType, None)
       case c@MagicWandChunk(_, _, _, _, _) =>
         heap += detMagicWand(model, c)
-      case _ => println("This case is not supported in detHeap")
+      case _ => //println("This case is not supported in detHeap")
     }
     heap
   }
@@ -511,24 +528,105 @@ object IntermediateCounterexampleModel {
     val fieldName = chunk.id.name
     val value = evaluateTerm(chunk.snap, model).toString
     val perm = evalPerm(chunk.perm, model)
-    BasicHeapEntry(Seq(recvVar), Seq(fieldName), value, perm, FieldType)
+    BasicHeapEntry(Seq(recvVar), Seq(fieldName), value, perm, FieldType, None)
   }
 
-  def detPredicate(model: Model, chunk: BasicChunk): BasicHeapEntry = {
-    val predSnap = chunk.snap
+  def detPredicate(model: Model, chunk: BasicChunk, predByName: scala.collection.immutable.Map[String, Predicate]): BasicHeapEntry = {
     val predName = chunk.id.name
     val references = chunk.args.map(x => evaluateTerm(x, model))
-    var insidePredicate = Seq[String]()
-    for (sub <- chunk.snap.subterms) {
-      if (!sub.toString.startsWith("$t@")) {
-        insidePredicate +:= sub.toString
-      }
+    var snap: Seq[ModelEntry] = Seq()
+    if (chunk.snap.isInstanceOf[First] || chunk.snap.isInstanceOf[Second] || chunk.snap.isInstanceOf[Var] || chunk.snap.isInstanceOf[Combine]) {
+      snap = evalSnap(chunk.snap, model: Model)
     }
+    val astPred = predByName.get(predName)
+    val insidePredicateMap = evalInsidePredicate(snap, astPred)
     val perm = evalPerm(chunk.perm, model)
-    BasicHeapEntry(Seq(predName), references.map(x => x.toString), insidePredicate.toString(), perm, PredicateType)
+    BasicHeapEntry(Seq(predName), references.map(x => x.toString), chunk.snap.toString, perm, PredicateType, Some(insidePredicateMap))
   }
 
-  def detPermWithInv(perm: Term, model: Model): Map[Seq[Seq[ValueEntry]], Option[Rational]] = {
+  def evalInsidePredicate(snap: Seq[ModelEntry], astPred: Option[Predicate]): scala.collection.immutable.Map[Exp, ModelEntry] = {
+    var ans = scala.collection.immutable.Map[Exp, ModelEntry]()
+    if (astPred.isDefined && !astPred.get.isAbstract) {
+      val predBody = astPred.get.body.get
+      val insPred = snapToBody(predBody, snap)
+      if (snap.length == 0 || (snap.length == 1 && (snap(0).toString.startsWith("$Snap") || snap(0).toString.startsWith("($Snap")))) {
+        ans = scala.collection.immutable.Map[Exp, ModelEntry]()
+      } else {
+        var assignedPredBody = scala.collection.immutable.Map[Exp, ModelEntry]()
+        for ((exp, value) <- insPred) {
+          if (value.toString.startsWith("$Snap") || value.toString.startsWith("($Snap")) {
+            assignedPredBody += evalBody(exp, UnspecifiedEntry, assignedPredBody)
+          } else {
+            assignedPredBody += evalBody(exp, value, assignedPredBody)
+          }
+        }
+        ans = assignedPredBody
+      }
+    }
+    ans
+  }
+
+  def evalBody(exp: Exp, value: ModelEntry, lookup: scala.collection.immutable.Map[Exp, ModelEntry]): (Exp, ModelEntry) = {
+    exp match {
+      case FieldAccessPredicate(predAcc, _) => (predAcc, value)
+      case CondExp(cond, thn, els) =>
+        if (evalExp(cond, lookup)) {
+          evalBody(thn, value, lookup)
+        } else {
+          evalBody(els, value, lookup)
+        }
+      case ast.Implies(left, right) =>
+        if (evalExp(left, lookup)) {
+          evalBody(right, value, lookup)
+        } else {
+          (left, ConstantEntry("False"))
+        }
+      case _ => (exp, value)
+    }
+  }
+
+  def evalExp(exp: Exp, lookup: scala.collection.immutable.Map[Exp, ModelEntry]): Boolean = exp match {
+    case NeCmp(left, right) => !(lookup.getOrElse(left, ConstantEntry(left.toString())).toString.equalsIgnoreCase(lookup.getOrElse(right, ConstantEntry(right.toString())).toString))
+    case ast.EqCmp(left, right) => (lookup.getOrElse(left, ConstantEntry(left.toString())).toString.equalsIgnoreCase(lookup.getOrElse(right, ConstantEntry(right.toString())).toString))
+    case _ => false
+  }
+
+  def snapToBody(body: Exp, snap: Seq[ModelEntry]): Seq[(Exp, ModelEntry)] = {
+    if (snap.length == 0) {
+      Seq()
+    } else if (snap.length == 1) {
+      Seq((body, snap(0)))
+    } else {
+      if (body.subExps.length == 2) {
+        Seq((body.subExps(0), snap(0))) ++ snapToBody(body.subExps(1), snap.tail)
+      } else {
+        Seq()
+      }
+    }
+  }
+
+  def evalSnap(term: Term, model: Model): Seq[ModelEntry] = term match {
+    case First(t) =>
+      val subSnap = evalSnap(t, model)
+      if (subSnap(0).isInstanceOf[ApplicationEntry]) {
+        Seq(subSnap(0).asInstanceOf[ApplicationEntry].arguments(0))
+      } else {
+        Seq(UnspecifiedEntry)
+      }
+    case Second(t) =>
+      val subSnap = evalSnap(t, model)
+      if (subSnap(0).isInstanceOf[ApplicationEntry]) {
+        Seq(subSnap(0).asInstanceOf[ApplicationEntry].arguments(1))
+      } else {
+        Seq(UnspecifiedEntry)
+      }
+    case Combine(t1, t2) => evalSnap(t1, model) ++ evalSnap(t2, model)
+    case Var(id, _) => Seq(model.entries.getOrElse(id.name, UnspecifiedEntry))
+    case SortWrapper(t, s) => Seq(ConstantEntry(t.toString))
+    case _ => Seq(UnspecifiedEntry)
+  }
+
+  def detPermWithInv(perm: Term, model: Model): (Seq[Seq[ValueEntry]], Option[Rational]) = {
     val check = "^inv@[0-9]+@[0-9]+\\([^)]*\\)$"
     val (originals, replacements) = detTermReplacement(perm, check).toSeq.unzip
     val newPerm = perm.replace(originals, replacements)
@@ -546,16 +644,16 @@ object IntermediateCounterexampleModel {
         case None => println(s"There is no Inverse Function with the name: ${inv.toString}")
       }
     }
-    val possibleInvCombinations = allInvFuncCombinations(allInvParameters)
-    possibleInvCombinations.foreach {println}
-    var inputsAndPerms = Map[Seq[Seq[ValueEntry]], Option[Rational]]()
-    for (combination <- possibleInvCombinations) {
-      val (tempOriginals, predicateInputs, tempReplacements) = combination.map { case x => (x._1, x._2, Var(SimpleIdentifier(x._3.asInstanceOf[ConstantEntry].value), x._1.sort)) }.unzip3
+    if (allInvParameters.toSeq.filter(x => x._2.isEmpty).isEmpty) {
+      val (tempOriginals, predicateInputs, tempReplacements) = allInvParameters.toSeq.map { case x => (x._1, x._2.head._1, Var(SimpleIdentifier(x._2.head._2.toString), x._1.sort)) }.unzip3
       val tempPerm = newPerm.replace(tempOriginals, tempReplacements)
       val evaluatedTempPerm = evalPerm(tempPerm, model)
-      inputsAndPerms += (predicateInputs -> evaluatedTempPerm)
+      (predicateInputs, evaluatedTempPerm)
+    } else {
+      val predicateInputs = allInvParameters.toSeq.filter(x => !x._2.isEmpty).map(x => x._2.head._1)
+      val evaluatedTempPerm = Some(Rational.zero)
+      (predicateInputs, evaluatedTempPerm)
     }
-    inputsAndPerms
   }
 
   def detTermReplacement(term: Term, pattern: String): Map[Term, Term] = {
@@ -594,15 +692,13 @@ object IntermediateCounterexampleModel {
           arg = x.toString
         }
       }
-      args ++= Seq(x.toString, arg)
+      args ++= Seq(arg)
     }
     val perm = evalPerm(chunk.perm, model)
-    BasicHeapEntry(Seq(name), args, "#undefined", perm, MagicWandType)
+    BasicHeapEntry(Seq(name), args, "#undefined", perm, MagicWandType, None)
   }
 
   def evalPerm(value: Term, model: Model): Option[Rational] = {
-    println(value.toString)
-    println(value.getClass)
     value match {
       case _: Var => evaluateTerm(value, model) match {
         case LitPermEntry(value) => Some(Rational.apply(value.numerator, value.denominator))
@@ -697,9 +793,7 @@ object IntermediateCounterexampleModel {
       case Let(_) => None
       case BuiltinEquals(t0, t1) =>
         val first = evalTermToModelEntry(t0, model)
-        println(first)
         val second = evalTermToModelEntry(t1, model)
-        println(second)
         if (first.toString == second.toString) {
           Some(Rational.one)
         } else {
@@ -857,28 +951,21 @@ object IntermediateCounterexampleModel {
     * it also extracts all instances (translates the generics to concrete values)
     */
   def getAllDomains(model: Model, program: ast.Program): Seq[BasicDomainEntry] = {
-    var domains = Seq[ast.Domain]()
-    var concreteDomains = Seq[(String, scala.collection.immutable.Map[ast.TypeVar, Type])]()
-    for (el <- program) {
-      el match {
-        case d: ast.Domain => domains +:= d
-        case ast.DomainType(name, map) =>
-          if (!map.values.toSeq.exists(x => x.isInstanceOf[ast.TypeVar])) {
-            concreteDomains +:= (name, map)
-          }
-        case ast.DomainFuncApp(name, _, map) =>
-          if (!map.values.toSeq.exists(x => x.isInstanceOf[ast.TypeVar])) {
-            concreteDomains +:= (name, map)
-          }
-        case _ => //
-      }
+    val domains = program.collect {
+      case a: ast.Domain => a
     }
+    val concreteDomains = program.collect { // find all definitive type instances
+      case ast.DomainType(n, map) => (n, map)
+      case d: ast.DomainFuncApp => (d.domainName, d.typVarMap) // sometimes we use a function without having an actual member of this...
+
+    }.filterNot(x => x._2.values.toSeq.exists(y => y.isInstanceOf[ast.TypeVar])).toSet // make sure we have all possible mappings without duplicates
+
     val doms: Seq[(ast.Domain, scala.collection.immutable.Map[ast.TypeVar, Type])] = domains.flatMap(x =>
       if (x.typVars == Nil) {
         Seq((x, Map.empty[ast.TypeVar, ast.Type]))
       } else {
         concreteDomains.filter(_._1 == x.name).map(y => (x, y._2))
-      })
+      }).toSeq
     var domainEntries = Seq[BasicDomainEntry]()
     for ((dom, typeMap) <- doms) {
       val types = try {
@@ -904,19 +991,70 @@ object IntermediateCounterexampleModel {
     * extracts the function instances by searching for the most likely match translating the values in the internal rep
     */
   def detFunction(model: Model, func: ast.FuncLike, genmap: scala.collection.immutable.Map[ast.TypeVar, ast.Type], program: ast.Program, hd: Boolean): BasicFunction = {
+    def toSort(typ: ast.Type): Either[Throwable, Sort] = Try(symbolConverter.toSort(typ)).toEither
+    def toSortWithSubstitutions(typ: ast.Type, typeErrorMsg: String): Either[String, Sort] = {
+      toSort(typ)
+        .left
+        .flatMap(_ => typ match {
+          case x: ast.GenericType => toSort(x.substitute(genmap)).left.map(_ => typeErrorMsg)
+          case t: ast.TypeVar => toSort(genmap.apply(t)).left.map(_ => typeErrorMsg)
+          case _ => Left("type not resolvable")
+        })
+    }
     val fname = func.name
     val resTyp: ast.Type = func.typ
     val argTyp: Seq[ast.Type] = func.formalArgs.map(x => x.typ)
-    model.entries.get(fname) match {
+    val keys = model.entries.keys
+    var (argSortErrors, argSort) = func.formalArgs
+      .map(x => toSortWithSubstitutions(x.typ, s"typeError in arg type ${x.typ}"))
+      .partitionMap(identity)
+    if (argSortErrors.nonEmpty) {
+      return BasicFunction("ERROR", argTyp, resTyp, Map.empty, s"$fname ${argSortErrors.head}")
+    }
+    val resSort = toSortWithSubstitutions(resTyp, s"typeError in return type $resTyp")
+      .fold(err => {
+        return BasicFunction("ERROR", argTyp, resTyp, Map.empty, s"$fname $err")
+      }, identity)
+    val smtfunc = func match {
+      case t: ast.Function => symbolConverter.toFunction(t).id
+      case t@ast.BackendFunc(_, _, _, _) => symbolConverter.toFunction(t, program).id
+      case t: ast.DomainFunc => symbolConverter.toFunction(t, argSort :+ resSort, program).id
+    }
+    val kek = smtfunc.toString
+      .replace("[", "<")
+      .replace("]", ">")
+      .replace(", ", "~_")
+    val modelfname = try {
+      (keys.filter(_.contains(fname + "%limited")) ++ keys.filter(_ == fname) ++ keys.filter(_ == kek)).head
+    } catch {
+      case _: Throwable => return BasicFunction("ERROR", argTyp, resTyp, Map.empty, s"$fname model function not found")
+    }
+    var heapStateList = Map[ValueEntry, String]()
+    var heapStateCounter = 0
+    def getTranslatedEntry(x: ValueEntry) : String = {
+      if (x.toString.startsWith("$")) {
+        if (heapStateList.contains(x)) {
+          heapStateList.get(x).get
+        } else {
+          val heapStateName = "Heap@" + heapStateCounter.toString
+          heapStateCounter += 1
+          heapStateList += (x -> heapStateName)
+          heapStateName
+        }
+      } else {
+        x.toString
+      }
+    }
+    model.entries.get(modelfname) match {
       case Some(MapEntry(m, els)) =>
         var options = Map[Seq[String], String]()
         if (hd) {
           for ((k, v) <- m) {
-            options += (k.map(x => x.toString) -> v.toString)
+            options += (k.map(x => getTranslatedEntry(x)) -> v.toString)
           }
         } else {
           for ((k, v) <- m) {
-            options += (k.tail.map(x => x.toString) -> v.toString)
+            options += (k.tail.map(x => getTranslatedEntry(x)) -> v.toString)
           }
         }
         BasicFunction(fname, argTyp, resTyp, options, els.toString)
@@ -961,7 +1099,38 @@ object CounterexampleGenerator {
     (StoreCounterexample(ans), refOccurences)
   }
 
-  def detHeap(basicHeap: BasicHeap, program: Program, collections: Set[CEValue], refOcc: Map[String, (String, Int)], model: Model): HeapCounterexample = {
+  def detTranslationMap(store: StoreCounterexample, fields: Map[String, (String, Int)]): Map[String, String] = {
+    var namesTranslation = Map[String, String]()
+    for (ent <- store.storeEntries) {
+      ent.entry match {
+        case CEVariable(internalName, _, _) => namesTranslation += (internalName -> ent.id.name)
+        case CESequence(internalName, _, _, _, _) => namesTranslation += (internalName -> (ent.id.name + " (Seq)"))
+        case CESet(internalName, _, _, _, _) => namesTranslation += (internalName -> (ent.id.name + " (Set)"))
+        case CEMultiset(internalName, _, _, _) => namesTranslation += (internalName -> (ent.id.name + " (MultiSet)"))
+      }
+    }
+    for ((k, v) <- fields) {
+      if (v._2 == 1) {
+        namesTranslation += (k -> v._1)
+      }
+    }
+    namesTranslation
+  }
+
+  def replace(expression: Exp, repl: scala.collection.immutable.Map[Exp, Exp]): Exp = {
+    repl.get(expression) match {
+      case Some(replacement) => replacement
+      case None =>
+        if (expression.subExps.isEmpty) {
+          expression
+        } else {
+          expression
+          //expression.subExps.map(x => replace(x, repl))
+        }
+    }
+  }
+
+  def detHeap(basicHeap: BasicHeap, program: Program, collections: Set[CEValue], translNames: Map[String, String], model: Model): HeapCounterexample = {
     var ans = Seq[(Resource, FinalHeapEntry)]()
     for (bhe <- basicHeap.basicHeapEntries) {
       bhe.het match {
@@ -971,19 +1140,19 @@ object CounterexampleGenerator {
               var found = false
               for (coll <- collections) {
                 if (bhe.valueID == coll.id) {
-                  if (refOcc.get(bhe.reference.head).isDefined && refOcc.get(bhe.reference.head).get._2 == 1) {
-                    ans +:= (fv, FieldFinalEntry(refOcc.get(bhe.reference.head).get._1, bhe.field.head, coll, bhe.perm, fv.typ))
+                  if (translNames.get(bhe.reference.head).isDefined) {
+                    ans +:= (fv, FieldFinalEntry(translNames.get(bhe.reference.head).get, bhe.field.head, coll, bhe.perm, fv.typ, bhe.het))
                   } else {
-                    ans +:= (fv, FieldFinalEntry(bhe.reference.head, bhe.field.head, coll, bhe.perm, fv.typ))
+                    ans +:= (fv, FieldFinalEntry(bhe.reference.head, bhe.field.head, coll, bhe.perm, fv.typ, bhe.het))
                   }
                   found = true
                 }
               }
               if (!found) {
-                if (refOcc.get(bhe.reference.head).isDefined && refOcc.get(bhe.reference.head).get._2 == 1) {
-                  ans +:= (fv, FieldFinalEntry(refOcc.get(bhe.reference.head).get._1, bhe.field.head, CEVariable("#undefined", ConstantEntry(bhe.valueID), Some(fv.typ)), bhe.perm, fv.typ))
+                if (translNames.get(bhe.reference.head).isDefined) {
+                  ans +:= (fv, FieldFinalEntry(translNames.get(bhe.reference.head).get, bhe.field.head, CEVariable("#undefined", ConstantEntry(bhe.valueID), Some(fv.typ)), bhe.perm, fv.typ, bhe.het))
                 } else {
-                  ans +:= (fv, FieldFinalEntry(bhe.reference.head, bhe.field.head, CEVariable("#undefined", ConstantEntry(bhe.valueID), Some(fv.typ)), bhe.perm, fv.typ))
+                  ans +:= (fv, FieldFinalEntry(bhe.reference.head, bhe.field.head, CEVariable("#undefined", ConstantEntry(bhe.valueID), Some(fv.typ)), bhe.perm, fv.typ, bhe.het))
                 }
               }
             }
@@ -992,29 +1161,49 @@ object CounterexampleGenerator {
           for ((pn, pv) <- program.predicatesByName) {
             if (pn == bhe.reference.head) {
               val refNames = bhe.field.map(x =>
-                if (refOcc.get(x).isDefined && refOcc.get(x).get._2 == 1) {
-                  refOcc.get(x).get._1
+                if (translNames.get(x).isDefined) {
+                  translNames.get(x).get
                 } else {
                   x
                 })
-              ans +:= (pv, PredFinalEntry(bhe.reference.head, refNames, bhe.perm))
+              var translatedArgs: Option[scala.collection.immutable.Map[Exp, ModelEntry]] = bhe.insidePredicate
+              if (bhe.insidePredicate.isDefined) {
+                translatedArgs = Some(bhe.insidePredicate.get.map{case (k,v) => (k, ConstantEntry(translNames.getOrElse(v.toString, model.entries.getOrElse(v.toString, v).toString)))})
+              }
+              ans +:= (pv, PredFinalEntry(bhe.reference.head, refNames, bhe.perm, translatedArgs, bhe.het))
             }
           }
         case MagicWandType | QPMagicWandType =>
-          val translatedArgs = bhe.field.grouped(2).map {
-            case Seq(first, second) =>
-              val ceValue = collections.find(s => (s.value.toString == second || s.id == second)).getOrElse(CEVariable("#undefined", ConstantEntry(second), None))
-              (first, ceValue)
-          }.toMap
+          val translatedArgs = bhe.field.map(x => translNames.getOrElse(x, x))
           for ((mw, idx) <- program.magicWandStructures.zipWithIndex) {
             val wandName = "wand@" ++ idx.toString
             if (bhe.reference(0) == wandName) {
-              ans +:= (mw, WandFinalEntry(wandName, mw.left, mw.right, translatedArgs, bhe.perm))
+              val mwStructure = mw.structure(program, true)
+              val replacements: Iterable[(ast.Node, ast.Node)] = mwStructure.subexpressionsToEvaluate(program).zip(translatedArgs).map(e => e._1 -> LocalVar(e._2, e._1.typ)())
+              val repl: scala.collection.immutable.Map[ast.Node, ast.Node] = scala.collection.immutable.Map.from(replacements)
+              val transformed = mwStructure.replace(repl)
+              ans +:= (mw, WandFinalEntry(wandName, transformed.left, transformed.right, scala.collection.immutable.Map[String, String](), bhe.perm, bhe.het))
             }
           }
         case _ => println("This type of heap entry could not be matched correctly!")
       }
     }
     HeapCounterexample(ans)
+  }
+
+  def detTranslatedDomains(domEntries: Seq[BasicDomainEntry], namesMap: Map[String, String]): Seq[BasicDomainEntry] = {
+    domEntries.map(de => BasicDomainEntry(de.name, de.types, detTranslatedFunctions(de.functions, namesMap)))
+  }
+
+  def detTranslatedFunctions(funEntries: Seq[BasicFunction], namesMap: Map[String, String]): Seq[BasicFunction] = {
+    funEntries.map(bf => detNameTranslationOfFunction(bf, namesMap))
+  }
+
+  def detNameTranslationOfFunction(fun: BasicFunction, namesMap: Map[String, String]): BasicFunction = {
+    val translatedFun = fun.options.map { case (in, out) =>
+      (in.map(intName => namesMap.getOrElse(intName, intName)), namesMap.getOrElse(out, out))
+    }
+    val translatedEls = namesMap.getOrElse(fun.default, fun.default)
+    BasicFunction(fun.fname, fun.argtypes, fun.returnType, translatedFun, translatedEls)
   }
 }

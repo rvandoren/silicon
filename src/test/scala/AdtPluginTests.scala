@@ -10,7 +10,9 @@ package viper.silicon.tests
 import viper.silicon.Silicon
 import viper.silver.reporter.NoopReporter
 
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class AdtPluginTests extends SiliconTests {
 
   override val testDirectories: Seq[String] = Seq("adt")

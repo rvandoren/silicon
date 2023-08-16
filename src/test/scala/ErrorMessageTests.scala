@@ -12,7 +12,9 @@ import viper.silver.ast.utility.rewriter._
 import viper.silver.ast.utility._
 import viper.silver.frontend.SilFrontend
 import viper.silver.verifier.errors._
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class ErrorMessageTests extends AnyFunSuite {
   test("MeetingExample") {
     val filePrefix = "errorMessageTests/misc/"

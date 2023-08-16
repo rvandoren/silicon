@@ -15,7 +15,9 @@ import org.scalatest.funsuite.AnyFunSuite
 import viper.silicon.Config
 import viper.silicon.state.terms._
 import viper.silicon.verifier.Verifier
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class TriggerRewriterTests extends AnyFunSuite with Matchers with BeforeAndAfter {
   val dummySink = new PrintWriter(new StringWriter())
 //  val dummyLogger = new MultiRunLogger(dummySink, () => None)

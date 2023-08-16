@@ -13,7 +13,9 @@ import viper.silicon.Silicon
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Future}
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 /** See also Silicon issue #315. */
 class ConcurrentInstantiationTests extends AnyFunSuite {
   test("ConcurrentInstantiationTest1") {

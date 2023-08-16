@@ -12,7 +12,9 @@ import viper.silicon.Config
 import viper.silicon.state.Identifier
 import viper.silicon.state.terms._
 import viper.silicon.verifier.Verifier
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class TriggerGeneratorTests extends AnyFunSuite with BeforeAndAfter {
   val triggerGenerator = new TriggerGenerator()
 

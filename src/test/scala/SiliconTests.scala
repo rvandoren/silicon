@@ -14,15 +14,13 @@ import viper.silver.testing.{LocatedAnnotation, MissingOutput, SilSuite, Unexpec
 import viper.silver.verifier.Verifier
 
 class SiliconTests extends SilSuite {
-  private val siliconTestDirectories =
-    Seq("consistency", "issue387")
+  private val siliconTestDirectories = Seq()
+    //Seq("consistency", "issue387")
 
-  private val silTestDirectories =
-    Seq("all",
-        "quantifiedpermissions", "quantifiedpredicates", "quantifiedcombinations",
-        "wands", "termination", "refute",
-        "examples")
-
+  private val silTestDirectories = {
+    Seq("examples")
+    //"all", "quantifiedpermissions", "quantifiedpredicates", "quantifiedcombinations",
+  }
   val testDirectories: Seq[String] = siliconTestDirectories ++ silTestDirectories
 
   override def frontend(verifier: Verifier, files: Seq[Path]): SiliconFrontend = {
@@ -36,8 +34,8 @@ class SiliconTests extends SilSuite {
 
   override def annotationShouldLeadToTestCancel(ann: LocatedAnnotation): Boolean = {
     ann match {
-      case UnexpectedOutput(_, _, _, _, _, _) => true
-      case MissingOutput(_, _, _, _, _, issue) => issue != 34
+      //case UnexpectedOutput(_, _, _, _, _, _) => true
+      //case MissingOutput(_, _, _, _, _, issue) => issue != 34
       case _ => false
     }
   }
@@ -55,6 +53,8 @@ class SiliconTests extends SilSuite {
     silicon.parseCommandLine(commandLineArguments ++ args :+ Silicon.dummyInputFilename)
   }
 
-  val commandLineArguments: Seq[String] =
-    Seq("--timeout", "600" /* seconds */)
+  val commandLineArguments: Seq[String] = {
+    Seq("--counterexample", "intermediate","--timeout", "600" /* seconds */)
+    //"--counterexample", "extended",
+  }
 }

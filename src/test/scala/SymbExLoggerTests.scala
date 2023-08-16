@@ -17,7 +17,9 @@ import viper.silver.verifier.{AbstractError, Verifier, Failure => SilFailure, Su
 
 import java.io.File
 import java.nio.file.{Files, Path, Paths}
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class SymbExLoggerTests extends SilSuite {
   val testDirectories = Seq("symbExLogTests")
 

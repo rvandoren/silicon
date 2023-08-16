@@ -164,9 +164,6 @@ case class SiliconMappedCounterexample(internalStore: Store,
                                        nativeModel: Model,
                                        program: Program)
     extends SiliconCounterexample {
-
-  println("Currently in SiliconMappedCounterexample Class")
-
   val converter: Converter =
     Converter(nativeModel, internalStore, heap, oldHeaps, program)
   val model: Model = nativeModel
@@ -174,27 +171,12 @@ case class SiliconMappedCounterexample(internalStore: Store,
   private var heapNames: Map[ValueEntry, String] = Map()
 
   override lazy val toString: String = {
-    println("This is the start of the toString function of the SiliconMappedCounterexample class")
-    println("Model:")
-    //println(model.toString)
-    println("InternalStore:")
-    println(internalStore.values)
-    println("Heap names:")
-    println(heapNames.toString())
-    println("Heap (chunks):")
-    println(heap foreach {
-      case c@BasicChunk(id, _, _, _, _) => c.toString
-      case _ => //
-    })
     val ce = CounterexampleGenerator(nativeModel, internalStore, heap, oldHeaps, program)
-    println(ce.toString)
-    println("in converter")
     val extractedModel = converter.extractedModel
     val bufModels = converter.modelAtLabel
       .map { case (label, model) => s"model at label $label:\n${interpret(model).toString}"}
       .mkString("\n")
     val (bufDomains, bufNonDomainFunctions) = functionsToString()
-    println("This is the end of the toString function of the SiliconMappedCounterexample class")
     s"$bufModels\non return: \n${interpret(extractedModel).toString} $bufDomains $bufNonDomainFunctions"
   }
   private def interpret(t: ExtractedModel): ExtractedModel =

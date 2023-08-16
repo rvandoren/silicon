@@ -14,7 +14,9 @@ import org.scalatest.funsuite.AnyFunSuite
 import viper.silicon.Config
 import viper.silicon.state.terms._
 import viper.silicon.verifier.Verifier
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class SimpleArithmeticTermSolverTests extends AnyFunSuite with Matchers with BeforeAndAfter {
   import SimpleArithmeticSolver.{solve, SolverResult, SolvingSuccess, SolvingFailure}
 

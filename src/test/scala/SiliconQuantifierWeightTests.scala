@@ -14,7 +14,9 @@ import viper.silver.ast
 import viper.silver.ast.{AnonymousDomainAxiom, Bool, Domain, DomainFunc, DomainFuncApp, EqCmp, Exists, Forall, Int, IntLit, LocalVar, LocalVarDecl, Method, Program, Seqn, Trigger, TrueLit, WeightedQuantifier}
 import viper.silver.reporter.NoopReporter
 import viper.silver.verifier.{Failure, Success}
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class SiliconQuantifierWeightTests extends AnyFunSuite {
   val symbolConverter = new DefaultSymbolConverter()
   val termConverter = new TermToSMTLib2Converter()

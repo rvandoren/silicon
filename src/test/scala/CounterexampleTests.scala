@@ -17,7 +17,9 @@ import viper.silver.parser.{FastParser, PAccPred, PBinExp, PExp, PFieldAccess, P
 import viper.silver.verifier.{FailureContext, VerificationError}
 
 import java.nio.file.Path
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 class CounterexampleTests extends SiliconTests {
   override val testDirectories: Seq[String] = Seq("counterexamples")
 

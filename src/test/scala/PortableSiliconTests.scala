@@ -63,7 +63,7 @@ import viper.silver.verifier.Verifier
   *   - SILICONTESTS_CSV = path/to/file.csv // Optional. If provided, mean & stddev are written to CSV file.
   *   - SILICONTESTS_RANDOMIZE_Z3 = bool // Optional, defaults to true. If true, passes --z3RandomizeSeeds to Silicon.
   */
-@DoNotDiscover
+
 class PortableSiliconTests extends SilSuite with StatisticalTestSuite {
   /** Following a hyphenation-based naming scheme is important for handling project-specific annotations.
     * See comment for [[viper.silver.testing.TestAnnotations.projectNameMatches()]].
@@ -79,10 +79,10 @@ class PortableSiliconTests extends SilSuite with StatisticalTestSuite {
   val timeoutPropertyName = "SILICONTESTS_TIMEOUT"
 
   val commandLineArguments: Seq[String] = Seq(
-    "--disableCatchingExceptions",
+    "--disableCatchingExceptions", "--counterexample", "intermediate",
     "--timeout", System.getProperty(timeoutPropertyName, "180") /* timeout in seconds */
   ) ++ (if (System.getProperty(randomizePropertyName, "false").toBoolean) Seq("--proverRandomizeSeeds") else Seq.empty)
-
+  //"--counterexample", "extended",
   lazy val verifier: Silicon = {
     val args =
       commandLineArguments ++

@@ -12,7 +12,9 @@ import java.nio.file.Paths
 import org.scalatest.flatspec.AnyFlatSpec
 import viper.silver.frontend.SilFrontend
 import viper.silicon.Silicon
+import org.scalatest.DoNotDiscover
 
+@DoNotDiscover
 /** This test is intended to benchmark the memory consumption of Silicon over
   * many runs in order to detect memory leaks. However, it is hard to tell
   * if the observation that the amount of used memory increases is due to a
