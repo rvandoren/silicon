@@ -1,5 +1,0 @@
-import <standard_import_tests/loop_all/la.vpr>
-
-domain LoopB {
-    axiom loopB { loopb() == true }
-}
