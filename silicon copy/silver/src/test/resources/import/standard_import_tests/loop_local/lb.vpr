@@ -1,5 +1,0 @@
-import "la.vpr"
-
-domain LoopB {
-    axiom loopB { loopb() == true }
-}
